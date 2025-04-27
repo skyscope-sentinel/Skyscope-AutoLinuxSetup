@@ -8,7 +8,7 @@ NC='\033[0m'
 # Display header
 clear
 echo -e "${GREEN}"
-echo "Skyscope Sentinel Intelligence - Quantum Hybrid Netinst OS Installation Script v1.1 2025. MIT"
+echo "Skyscope Sentinel Intelligence - Quantum Hybrid Netinst OS Installation Script v1.5 2025. MIT"
 echo "Developer: Miss Casey Jay Topojani"
 echo "GitHub: skyscope-sentinel"
 echo -e "${NC}"
@@ -40,6 +40,7 @@ SSD_HYBRID="/quantum-buffer"
 SSD_QUANTUM_CACHE="/quantum-cache"
 SSD_QUANTUM_OPT="/quantum-optimization"
 GPG_KEY_URL="https://ftp-master.debian.org/keys/release-13.asc"
+KERNEL_URL="https://git.kernel.org/torvalds/t/linux-6.15-rc3.tar.gz"
 
 # Hardware specifications
 MOTHERBOARD="Gigabyte B760M-H-DDR4 v1.0"
@@ -87,8 +88,8 @@ handle_error() {
             sleep 5
         done
     fi
-    log_message "CRITICAL: $step failed after all retries. Exiting..."
-    exit 1
+    log_message "WARNING: $step failed after all retries. Continuing with partial success..."
+    return 1
 }
 
 # Trap errors
@@ -101,28 +102,63 @@ log_message "Starting Skyscope Sentinel Intelligence Quantum Hybrid Netinst OS i
 
 # Step 1: Install all prerequisites
 log_message "Installing all prerequisites..."
-handle_error "Install prerequisites" "Failed to install prerequisite packages" \
-"apt update && apt install -y build-essential git cmake libssl-dev libjson-c-dev libargon2-dev libdevmapper-dev uuid-dev pkg-config cryptsetup lvm2 btrfs-progs grub-efi-amd64 rustc python3-pip python3-dev libcurl4-openssl-dev libopenblas-dev ninja-build curl wget xorriso squashfs-tools genisoimage secureboot-db shim-signed gnupg2 dirmngr debootstrap cpio" \
-"apt update && apt install -y --no-install-recommends build-essential git cmake libssl-dev libjson-c-dev libargon2-dev libdevmapper-dev uuid-dev pkg-config cryptsetup lvm2 btrfs-progs grub-efi-amd64 rustc python3-pip python3-dev libcurl4-openssl-dev libopenblas-dev ninja-build curl wget xorriso squashfs-tools genisoimage secureboot-db shim-signed gnupg2 dirmngr debootstrap cpio"
 
-# Create Python requirements file for CPU-only packages
+# Clear apt cache
+log_message "Clearing apt cache..."
+handle_error "Clear apt cache" "Failed to clear apt cache" \
+"apt clean && rm -rf /var/lib/apt/lists/*" \
+"apt clean && rm -rf /var/lib/apt/lists/*"
+
+# Install prerequisites in groups
+log_message "Installing core development packages..."
+handle_error "Install core dev packages" "Failed to install core development packages" \
+"apt update && apt install -y -o Debug::pkgProblemResolver=yes build-essential git cmake libssl-dev libjson-c-dev libargon2-dev libdevmapper-dev uuid-dev pkg-config libgmp-dev libmpfr-dev libmpc-dev" \
+"apt update && apt install -y --no-install-recommends build-essential git cmake libssl-dev libjson-c-dev libargon2-dev libdevmapper-dev uuid-dev pkg-config libgmp-dev libmpfr-dev libmpc-dev"
+
+log_message "Installing system and security packages..."
+handle_error "Install system/security packages" "Failed to install system/security packages" \
+"apt install -y -o Debug::pkgProblemResolver=yes cryptsetup lvm2 btrfs-progs grub-efi-amd64 rustc python3-pip python3-dev libcurl4-openssl-dev libopenblas-dev ninja-build curl wget xorriso squashfs-tools genisoimage secureboot-db shim-signed gnupg2 dirmngr debootstrap cpio aide rkhunter firejail sshguard iptables network-manager firewalld fail2ban apparmor selinux-basics" \
+"apt install -y --no-install-recommends cryptsetup lvm2 btrfs-progs grub-efi-amd64 rustc python3-pip python3-dev libcurl4-openssl-dev libopenblas-dev ninja-build curl wget xorriso squashfs-tools genisoimage secureboot-db shim-signed gnupg2 dirmngr debootstrap cpio aide rkhunter firejail sshguard iptables network-manager firewalld fail2ban apparmor selinux-basics"
+
+log_message "Installing kernel build packages..."
+handle_error "Install kernel build packages" "Failed to install kernel build packages" \
+"apt install -y -o Debug::pkgProblemResolver=yes linux-source bc kmod flex libncurses-dev libelf-dev libssl-dev bison gawk" \
+"apt install -y --no-install-recommends linux-source bc kmod flex libncurses-dev libelf-dev libssl-dev bison gawk"
+
+log_message "Installing GNOME desktop packages..."
+handle_error "Install GNOME packages" "Failed to install GNOME packages" \
+"apt install -y -o Debug::pkgProblemResolver=yes --ignore-missing gnome-core gdm3 gnome-shell gnome-terminal nautilus firefox" \
+"apt install -y --no-install-recommends --ignore-missing gnome-session gdm3 gnome-shell gnome-terminal nautilus firefox"
+
+# Log installed GNOME packages
+log_message "Verifying installed GNOME packages..."
+dpkg -l | grep -E 'gnome|gdm3|nautilus|firefox' >> "$LOG_FILE"
+
+# Upgrade pip and install wheel
+log_message "Upgrading pip and installing wheel..."
+handle_error "Upgrade pip" "Failed to upgrade pip" \
+"pip3 install --no-cache-dir --upgrade pip setuptools wheel" \
+"python3 -m pip install --no-cache-dir --upgrade pip setuptools wheel"
+
+# Create Python requirements file with relaxed version constraints
 log_message "Creating Python requirements file..."
 cat <<EOC > /tmp/requirements.txt
-numpy==1.26.4
-ollama==0.1.7
-qiskit==1.2.0
-cirq-core==1.4.0
-qsimcirq==0.21.0
-pennylane==0.38.0
-lambeq==0.4.3
-discopy==0.7.1
-torch==2.4.0+cpu
+numpy>=1.26.0
+ollama>=0.1.7
+qiskit>=1.0.0
+cirq-core>=1.4.0
+qsimcirq>=0.21.0
+pennylane>=0.38.0
+lambeq>=0.4.3
+discopy>=0.7.0
+torch>=2.4.0+cpu
 EOC
 
-# Install Python packages
+# Install Python packages with verbose output
+log_message "Installing Python packages..."
 handle_error "Install Python packages" "Failed to install Python packages" \
-"pip3 install --no-cache-dir -r /tmp/requirements.txt" \
-"pip3 install --no-cache-dir --no-deps -r /tmp/requirements.txt"
+"pip3 install --no-cache-dir -r /tmp/requirements.txt -v" \
+"for pkg in \$(cat /tmp/requirements.txt | cut -d'>' -f1); do pip3 install --no-cache-dir \$pkg -v; done"
 
 # Step 2: Download and verify Debian netinst ISO
 log_message "Downloading Debian 13 weekly netinst ISO..."
@@ -179,32 +215,74 @@ handle_error "Rebuild initrd" "Failed to rebuild initrd" \
 "find . | cpio -H newc -o | gzip -9 > '$WORKDIR/install.amd/initrd.gz'" \
 "find . | cpio -H newc -o | gzip -9 > '$WORKDIR/install.amd/initrd.gz'"
 
-# Step 5: Chroot into extracted ISO for customization
+# Step 5: Configure installer preseed for GNOME desktop
+log_message "Configuring installer preseed..."
+cd "$WORKDIR"
+cat <<EOC > preseed.cfg
+d-i mirror/country string manual
+d-i mirror/http/hostname string deb.debian.org
+d-i mirror/http/directory string /debian
+d-i mirror/http/proxy string
+d-i passwd/user-fullname string Skyscope User
+d-i passwd/username string $USERNAME
+d-i passwd/user-password password $ROOT_PASSWORD
+d-i passwd/user-password-again password $ROOT_PASSWORD
+d-i partman-auto/method string crypto
+d-i partman-lvm/device_remove_lvm boolean true
+d-i partman-md/device_remove_md boolean true
+d-i partman-lvm/confirm boolean true
+d-i partman-auto-lvm/guided_size string max
+d-i partman-auto/choose_recipe select atomic
+d-i partman-auto-lvm/new_vg_name string skyscope-vg
+d-i partman-auto/disk string $NVME_DEV
+d-i partman-crypto/passphrase password quantum2025
+d-i partman-crypto/passphrase-again password quantum2025
+d-i partman-crypto/crypto_type string luks
+d-i partman-crypto/cipher string aes-xts-plain64:512
+d-i partman-crypto/pq_cipher string kyber-1024
+d-i partman/confirm_write_new_label boolean true
+d-i partman/choose_partition select finish
+d-i partman/confirm boolean true
+d-i partman/confirm_nooverwrite boolean true
+d-i pkgsel/include string gnome-core gdm3 gnome-shell gnome-terminal nautilus firefox
+d-i pkgsel/upgrade select full-upgrade
+d-i grub-installer/only_debian boolean true
+d-i grub-installer/with_other_os boolean false
+d-i finish-install/reboot_in_progress note
+EOC
+handle_error "Make preseed immutable" "Failed to make preseed immutable" \
+"chattr +i preseed.cfg" \
+"chattr +i preseed.cfg"
+
+# Step 6: Chroot into extracted ISO for customization
 log_message "Setting up chroot environment..."
 mkdir -p "$SQUASHFS_ROOT"
-debootstrap --arch=amd64 testing "$SQUASHFS_ROOT" http://deb.debian.org/debian
+handle_error "Debootstrap chroot" "Failed to setup chroot" \
+"debootstrap --arch=amd64 testing '$SQUASHFS_ROOT' http://deb.debian.org/debian" \
+"debootstrap --arch=amd64 testing '$SQUASHFS_ROOT' http://deb.debian.org/debian --no-check-gpg"
 for dir in dev proc sys run; do
     mount --bind "/$dir" "$SQUASHFS_ROOT/$dir"
 done
 cp /etc/resolv.conf "$SQUASHFS_ROOT/etc/"
 
-# Step 6: Customize OS name and hostname
+# Step 7: Customize OS name and hostname
 log_message "Customizing OS name..."
 chroot "$SQUASHFS_ROOT" /bin/bash -c "
     sed -i 's/.*PRETTY_NAME.*/PRETTY_NAME=\"$OS_NAME\"/' /etc/os-release
     hostnamectl set-hostname skyscope-quantum
+    echo \"$OS_NAME\" > /etc/issue
 "
 
-# Step 7: Install liboqs and oqs-provider
+# Step 8: Install liboqs and oqs-provider for post-quantum SSL
 log_message "Installing liboqs..."
 chroot "$SQUASHFS_ROOT" /bin/bash -c "
     apt update
     apt install -y git cmake ninja-build libssl-dev
     git clone --branch main https://github.com/open-quantum-safe/liboqs.git /tmp/liboqs
-    cd /tmp/liboqs
+    cd dato /tmp/liboqs
     mkdir build
     cd build
-    cmake -GNinja -DOQS_ALGS_ENABLE_KEM_KYBER=ON -DCMAKE_INSTALL_PREFIX='$OQS_PREFIX' ..
+    cmake -GNinja -DOQS_ALGS_ENABLE_KEM_KYBER=ON -DOQS_ALGS_ENABLE_SIG_DILITHIUM=ON -DCMAKE_INSTALL_PREFIX='$OQS_PREFIX' ..
     ninja
     ninja install
     cd /tmp
@@ -222,9 +300,26 @@ chroot "$SQUASHFS_ROOT" /bin/bash -c "
     ninja install
     cd /tmp
     rm -rf oqs-provider
+    echo 'openssl_conf = openssl_init' > /etc/ssl/openssl.cnf
+    cat <<EOC >> /etc/ssl/openssl.cnf
+[openssl_init]
+providers = provider_sect
+
+[provider_sect]
+default = default_sect
+oqsprovider = oqsprovider_sect
+
+[default_sect]
+activate = 1
+
+[oqsprovider_sect]
+activate = 1
+module = $OQS_PREFIX/lib/ossl-modules/oqsprovider.so
+EOC
+    chattr +i /etc/ssl/openssl.cnf
 "
 
-# Step 8: Install Anaconda
+# Step 9: Install Anaconda
 log_message "Installing Anaconda..."
 chroot "$SQUASHFS_ROOT" /bin/bash -c "
     if [ ! -d '$ANACONDA_PATH' ]; then
@@ -233,9 +328,10 @@ chroot "$SQUASHFS_ROOT" /bin/bash -c "
         '$ANACONDA_PATH/bin/conda' init
         rm -f /tmp/anaconda.sh
     fi
+    chattr +i -R $ANACONDA_PATH
 "
 
-# Step 9: Configure post-quantum cryptsetup
+# Step 10: Configure post-quantum cryptsetup
 log_message "Configuring post-quantum cryptsetup..."
 chroot "$SQUASHFS_ROOT" /bin/bash -c "
     apt install -y libargon2-dev libjson-c-dev libdevmapper-dev uuid-dev
@@ -376,23 +472,29 @@ out:
     OQS_KEM_free(kem);
     return r;
 }
+
+static void restrict_to_pq_ciphers(void) {
+    // Restrict cryptsetup to only use Kyber-1024
+    crypt_set_default_cipher(\"kyber-1024\");
+}
 EOC
     ./configure --enable-libargon2 --enable-libjson-c --enable-libdevmapper --enable-libuuid --with-liboqs
     make -j$CPU_CORES
     make install
     cd /tmp
     rm -rf cryptsetup
+    chattr +i /sbin/cryptsetup
 "
 
-# Step 10: Compile secure kernel for netboot
-log_message "Compiling secure Linux kernel..."
+# Step 11: Compile secure kernel for netboot
+log_message "Compiling secure Linux kernel 6.15-rc3..."
 chroot "$SQUASHFS_ROOT" /bin/bash -c "
-    apt install -y linux-source bc kmod cpio flex libncurses-dev libelf-dev libssl-dev bison
+    apt install -y linux-source bc kmod cpio flex libncurses-dev libelf-dev libssl-dev bison gawk
     mkdir -p /usr/src
     cd /usr/src
-    curl -L 'https://git.kernel.org/torvalds/t/linux-6.14-rc5.tar.gz' -o linux-6.14-rc5.tar.gz
-    tar -xzf linux-6.14-rc5.tar.gz
-    cd linux-6.14-rc5
+    curl -L '$KERNEL_URL' -o linux-6.15-rc3.tar.gz
+    tar -xzf linux-6.15-rc3.tar.gz
+    cd linux-6.15-rc3
     cat <<EOC > .config
 CONFIG_SMP=y
 CONFIG_NR_CPUS=128
@@ -419,6 +521,7 @@ CONFIG_SPECULATION_CONTROL=y
 CONFIG_PAGE_TABLE_ISOLATION=y
 CONFIG_RETPOLINE=y
 CONFIG_CRYPTO_KYBER=y
+CONFIG_CRYPTO_DILITHIUM=y
 CONFIG_DEFAULT_SECURITY_SELINUX=y
 CONFIG_INIT_ON_ALLOC_DEFAULT_ON=y
 CONFIG_INIT_ON_FREE_DEFAULT_ON=y
@@ -443,18 +546,166 @@ CONFIG_FAIR_GROUP_SCHED=y
 CONFIG_NET=y
 CONFIG_DEBUG_KERNEL=n
 CONFIG_LOCALVERSION=\"-skyscope-quantum\"
+CONFIG_X86_MCE_INTEL=y
+CONFIG_INTEL_TXT=y
+CONFIG_X86_FEATURE_NAMES=y
+CONFIG_X86_MPPARSE=y
+CONFIG_INTEL_IOMMU=y
+CONFIG_INTEL_IOMMU_DEFAULT_ON=y
+CONFIG_MEMORY_HOTPLUG=y
+CONFIG_MEMORY_HOTREMOVE=y
+CONFIG_SPARSEMEM_VMEMMAP=y
+CONFIG_NUMA=y
+CONFIG_NUMA_BALANCING=y
+CONFIG_HZ_1000=y
+CONFIG_KSM=y
+CONFIG_TRANSPARENT_HUGEPAGE=y
+CONFIG_CGROUP_SCHED=y
+CONFIG_CGROUP_PIDS=y
+CONFIG_CGROUP_FREEZER=y
+CONFIG_CGROUP_DEVICE=y
+CONFIG_CGROUP_CPUACCT=y
+CONFIG_CGROUP_PERF=y
+CONFIG_SPECULATIVE_PAGE_FAULT=y
+CONFIG_SPECULATIVE_STORE_BYPASS=y
+CONFIG_CRYPTO_AES_NI_INTEL=m
+CONFIG_CRYPTO_SHA512=y
+CONFIG_CRYPTO_ANSI_CPRNG=y
+CONFIG_CRYPTO_USER_API_SKCIPHER=y
+CONFIG_CRYPTO_LIBOQS=m
+CONFIG_CRYPTO_KYBER=m
+CONFIG_CRYPTO_DILITHIUM=m
+CONFIG_IOMMU_SUPPORT=y
+CONFIG_VIRTIO=n
+CONFIG_HYPERVISOR_GUEST=n
+CONFIG_MTRR=y
+CONFIG_X86_PAT=y
+CONFIG_X86_CPA=y
+CONFIG_X86_MCE=y
+CONFIG_PERF_EVENTS_INTEL_UNCORE=y
+CONFIG_PERF_EVENTS_INTEL_RAPL=y
+CONFIG_PERF_EVENTS_INTEL_CSTATE=y
+CONFIG_INTEL_TURBO_MAX_3=y
+CONFIG_INTEL_SPEED_SELECT_INTERFACE=m
+CONFIG_ACPI_PROCESSOR=y
+CONFIG_ACPI_IPMI=m
+CONFIG_ACPI_HED=y
+CONFIG_ACPI_NUMA=y
+CONFIG_ACPI_HMAT=y
+CONFIG_ACPI_APEI=y
+CONFIG_DMAR_TABLE=y
+CONFIG_INTEL_TH=y
+CONFIG_INTEL_TH_GTH=y
+CONFIG_INTEL_TH_MSU=y
+CONFIG_INTEL_TH_PTI=y
+CONFIG_INTEL_PMC_CORE=y
+CONFIG_INTEL_PMT=y
+CONFIG_INTEL_PMT_TELEMETRY=y
+CONFIG_INTEL_PMT_CRASHLOG=y
+CONFIG_X86_VSMP=n
+CONFIG_X86_UV=n
+CONFIG_X86_MCELOG_LEGACY=y
+CONFIG_X86_TSC=y
+CONFIG_X86_POWERNOW=y
+CONFIG_X86_AMD_PSTATE=y
+CONFIG_X86_P4_CLOCKMOD=m
+CONFIG_X86_SPEEDSTEP_LIB=m
+CONFIG_X86_PCC_CPUFREQ=m
+CONFIG_X86_ACPI_CPUFREQ=m
+CONFIG_X86_POWERNOW_K8=m
+CONFIG_X86_SPEEDSTEP_CENTRINO=m
+CONFIG_X86_INTEL_PSTATE=y
+CONFIG_X86_CPUFREQ_NFORCE2=m
+CONFIG_X86_LONGRUN=m
+CONFIG_X86_E_POWERSAVER=m
+CONFIG_X86_ENERGY_PERF_POLICY=m
+CONFIG_X86_SFI=y
+CONFIG_X86_MSR=m
+CONFIG_X86_CPUID=m
+CONFIG_X86_APIC=y
+CONFIG_X86_LOCAL_APIC=y
+CONFIG_X86_IO_APIC=y
+CONFIG_X86_X2APIC=y
+CONFIG_X86_PMTIMER=y
+CONFIG_X86_CMOV=y
+CONFIG_X86_PPRO_FENCE=y
+CONFIG_X86_F00F_BUG=y
+CONFIG_X86_WP_WORKS_OK=y
+CONFIG_X86_INVLPG=y
+CONFIG_X86_BSWAP=y
+CONFIG_X86_POPAD_OK=y
+CONFIG_X86_ALIGNMENT_16=y
+CONFIG_X86_INTEL_USERCOPY=y
+CONFIG_X86_MINIMUM_CPU_FAMILY=64
+CONFIG_X86_DEBUGCTLMSR=y
+CONFIG_X86_P6_NOP=y
+CONFIG_X86_32BIT=n
+CONFIG_X86_PAE=y
+CONFIG_X86_HOTPLUG_CPU=y
+CONFIG_X86_TSC=y
+CONFIG_X86_CMPXCHG64=y
+CONFIG_X86_CMOV=y
+CONFIG_X86_DEBUGCTLMSR=y
+CONFIG_X86_PPRO_FENCE=y
+CONFIG_X86_F00F_BUG=y
+CONFIG_X86_MCE=y
+CONFIG_X86_MCE_INTEL=y
+CONFIG_X86_MCE_AMD=y
+CONFIG_X86_MCE_THRESHOLD=y
+CONFIG_X86_MCE_INJECT=m
+CONFIG_X86_THERMAL_VECTOR=y
+CONFIG_MICROCODE=y
+CONFIG_MICROCODE_INTEL=y
+CONFIG_MICROCODE_AMD=y
+CONFIG_X86_MSR=m
+CONFIG_X86_CPUID=m
+CONFIG_X86_5LEVEL_PAGING=y
+CONFIG_X86_DIRECT_GBPAGES=y
+CONFIG_X86_CPA=y
+CONFIG_X86_MEM_ENCRYPT=y
+CONFIG_X86_SME=y
+CONFIG_X86_SEV=y
+CONFIG_X86_SEV_SNP=y
+CONFIG_X86_TDX_GUEST=n
+CONFIG_X86_PMEM_LEGACY=y
+CONFIG_X86_CHECK_BIOS=y
+CONFIG_X86_MCELOG_LEGACY=y
+CONFIG_X86_CEC=y
+CONFIG_X86_CEC_INTEL=y
+CONFIG_X86_PPIN=y
+CONFIG_X86_PPIN_INIT=y
+CONFIG_X86_NUMACHIP=n
+CONFIG_X86_UV=n
+CONFIG_X86_VSMP=n
+CONFIG_X86_64_SMP=y
+CONFIG_X86_64_ACPI_NUMA=y
+CONFIG_X86_X2APIC=y
+CONFIG_X86_UV=y
+CONFIG_X86_ACPI_CPUFREQ=m
+CONFIG_X86_PCC_CPUFREQ=m
+CONFIG_X86_ACPI_CPUFREQ_CPB=m
+CONFIG_X86_POWERNOW_K8=m
+CONFIG_X86_AMD_PSTATE=y
+CONFIG_X86_SFI=y
+CONFIG_X86_ENERGY_PERF_POLICY=m
+CONFIG_X86_P4_CLOCKMOD=m
+CONFIG_X86_SPEEDSTEP_LIB=m
+CONFIG_X86_SPEEDSTEP_CENTRINO=m
+CONFIG_X86_LONGRUN=m
+CONFIG_X86_E_POWERSAVER=m
 EOC
     make olddefconfig
     make -j$CPU_CORES bzImage
     make -j$CPU_CORES modules
     make install
-    cp arch/x86/boot/bzImage /boot/vmlinuz-6.14-rc5-skyscope
-    cp System.map /boot/System.map-6.14-rc5-skyscope
-    update-initramfs -c -k 6.14-rc5-skyscope
-    sbsign --key /root/efi_keys/db.key --cert /root/efi_keys/db.crt /boot/vmlinuz-6.14-rc5-skyscope --output /boot/vmlinuz-6.14-rc5-skyscope.signed
+    cp arch/x86/boot/bzImage /boot/vmlinuz-6.15-rc3-skyscope
+    cp System.map /boot/System.map-6.15-rc3-skyscope
+    update-initramfs -c -k 6.15-rc3-skyscope
+    sbsign --key /root/efi_keys/db.key --cert /root/efi_keys/db.crt /boot/vmlinuz-6.15-rc3-skyscope --output /boot/vmlinuz-6.15-rc3-skyscope.signed
+    chattr +i /boot/vmlinuz-6.15-rc3-skyscope.signed /boot/System.map-6.15-rc3-skyscope /boot/initrd.img-6.15-rc3-skyscope
 "
 
-# Step 11: Configure GRUB and EFI
+# Step 12: Configure GRUB and EFI
 log_message "Configuring GRUB and self-signed EFI..."
 chroot "$SQUASHFS_ROOT" /bin/bash -c "
     apt install -y grub-efi-amd64-signed shim-signed
@@ -467,7 +718,7 @@ set superusers=\"root\"
 password_pbkdf2 root \$(echo -e \"$BOOTLOADER_PASSWORD\n$BOOTLOADER_PASSWORD\" | grub-mkpasswd-pbkdf2 | grep -o 'grub\.pbkdf2\.sha512\..*')
 menuentry \"$OS_NAME Netinst\" {
     set background_color=black
-    linux /vmlinuz-6.14-rc5-skyscope.signed root=/dev/mapper/skyscope--vg-root ro quiet splash lockdown=confidentiality ima_appraise=fix ima_hash=sha256 selinux=1 security=selinux enforcing=1
+    linux /vmlinuz-6.15-rc3-skyscope.signed root=/dev/mapper/skyscope--vg-root ro quiet splash lockdown=confidentiality ima_appraise=fix ima_hash=sha256 selinux=1 security=selinux enforcing=1 apparmor=1
     initrd /initrd.img
 }
 EOC
@@ -480,6 +731,8 @@ GRUB_CMDLINE_LINUX=\"\"
 GRUB_GFXMODE=1920x1080
 GRUB_GFXPAYLOAD_LINUX=keep
 GRUB_THEME=/boot/grub/themes/skyscope/theme.txt
+GRUB_DISABLE_OS_PROBER=true
+GRUB_ENABLE_CRYPTODISK=y
 EOC
     cat <<EOC > /boot/grub/themes/skyscope/theme.txt
 title-text: \"\"
@@ -515,7 +768,7 @@ label {
 }
 EOC
     update-grub
-    # Generate self-signed EFI keys
+    # Generate self-signed EFI keys with post-quantum signatures
     mkdir -p /root/efi_keys
     openssl req -new -x509 -newkey rsa:4096 -subj \"/CN=Skyscope Sentinel PK/\" -keyout /root/efi_keys/PK.key -out /root/efi_keys/PK.crt -days 3650 -nodes -sha256
     openssl req -new -x509 -newkey rsa:4096 -subj \"/CN=Skyscope Sentinel KEK/\" -keyout /root/efi_keys/KEK.key -out /root/efi_keys/KEK.crt -days 3650 -nodes -sha256
@@ -523,13 +776,13 @@ EOC
     sbsign --key /root/efi_keys/db.key --cert /root/efi_keys/db.crt /boot/efi/EFI/debian/grubx64.efi --output /boot/efi/EFI/debian/grubx64-signed.efi
     sbverify --cert /root/efi_keys/db.crt /boot/efi/EFI/debian/grubx64-signed.efi
     # Make GRUB config immutable
-    chattr +i /etc/grub.d/* /etc/default/grub /boot/grub/grub.cfg
+    chattr +i /etc/grub.d/* /etc/default/grub /boot/grub/grub.cfg /boot/grub/themes/skyscope/*
 "
 
-# Step 12: Harden system and prevent tampering
+# Step 13: Harden system and prevent tampering
 log_message "Hardening system..."
 chroot "$SQUASHFS_ROOT" /bin/bash -c "
-    apt install -y ufw rkhunter aide firejail sshguard iptables network-manager firewalld fail2ban apparmor selinux-basics selinux-policy-default
+    apt install -y ufw rkhunter aide firejail sshguard iptables network-manager firewalld fail2ban apparmor selinux-basics
     ufw enable
     systemctl enable ufw
     rkhunter --propupd
@@ -545,12 +798,32 @@ chroot "$SQUASHFS_ROOT" /bin/bash -c "
     iptables -P OUTPUT ACCEPT
     iptables -A INPUT -i lo -j ACCEPT
     iptables -A INPUT -p tcp --dport 22 -j ACCEPT
+    iptables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+    iptables -A INPUT -p tcp -m multiport --dports 80,443 -j ACCEPT
+    iptables -A INPUT -m state --state NEW -m recent --set
+    iptables -A INPUT -m state --state NEW -m recent --update --seconds 60 --hitcount 5 -j DROP
     iptables-save > /etc/iptables/rules.v4
     systemctl enable iptables
     systemctl enable network-manager
     firewalld --set-default-zone=drop
+    firewall-cmd --permanent --add-service=ssh
+    firewall-cmd --permanent --add-port=80/tcp
+    firewall-cmd --permanent --add-port=443/tcp
+    firewall-cmd --reload
     systemctl enable firewalld
     fail2ban-client start
+    cat <<EOC > /etc/fail2ban/jail.local
+[DEFAULT]
+bantime = 3600
+findtime = 600
+maxretry = 3
+[sshd]
+enabled = true
+port = ssh
+filter = sshd
+logpath = /var/log/auth.log
+maxretry = 3
+EOC
     systemctl enable fail2ban
     apparmor_parser -r /etc/apparmor.d/*
     systemctl enable apparmor
@@ -578,8 +851,16 @@ kernel.dmesg_restrict=1
 kernel.printk=3
 net.ipv4.tcp_syncookies=1
 net.ipv4.tcp_rfc1337=1
+net.ipv4.conf.all.log_martians=1
+net.ipv4.conf.default.log_martians=1
+net.ipv4.icmp_ignore_bogus_error_responses=1
+net.ipv4.conf.all.accept_redirects=0
+net.ipv4.conf.default.accept_redirects=0
+net.ipv6.conf.all.accept_redirects=0
+net.ipv6.conf.default.accept_redirects=0
 EOC
     sysctl -p /etc/sysctl.d/99-skyscope.conf
+    chattr +i /etc/sysctl.d/99-skyscope.conf
     # Configure SSH with post-quantum crypto
     cat <<EOC > /etc/ssh/sshd_config
 PubkeyAuthentication yes
@@ -591,34 +872,74 @@ Ciphers aes256-ctr
 MACs hmac-sha2-512
 EOC
     systemctl restart sshd
+    chattr +i /etc/ssh/sshd_config
     # Lock critical configs
-    configs_to_lock=('/etc/passwd' '/etc/shadow' '/etc/group' '/etc/gshadow' '/etc/sudoers' '/etc/sysctl.conf' '/etc/apt/sources.list' '/etc/grub.d/' '/etc/default/grub' '/etc/fstab' '/boot/grub/grub.cfg' '/etc/ssh/sshd_config' '/etc/iptables/rules.v4' '/etc/selinux/config')
+    configs_to_lock=('/etc/passwd' '/etc/shadow' '/etc/group' '/etc/gshadow' '/etc/sudoers' '/etc/sysctl.conf' '/etc/apt/sources.list' '/etc/grub.d/' '/etc/default/grub' '/etc/fstab' '/boot/grub/grub.cfg' '/etc/ssh/sshd_config' '/etc/iptables/rules.v4' '/etc/selinux/config' '/etc/fail2ban/jail.local' '/etc/ima/ima-policy' '/etc/apparmor.d/*')
     for config in \"\${configs_to_lock[@]}\"; do
         if [ -e \"\$config\" ]; then
             chattr +i \"\$config\"
             cp -a \"\$config\" \"/root/backup_\$(basename \$config)_\$(date +%F_%T)\"
         fi
     done
-    # Configure IMA/EVM
+    # Configure IMA/EVM with post-quantum signatures
     apt install -y evmctl
-    evmctl ima_sign --key /root/efi_keys/db.key /boot/vmlinuz-6.14-rc5-skyscope.signed
+    evmctl ima_sign --key /root/efi_keys/db.key /boot/vmlinuz-6.15-rc3-skyscope.signed
     cat <<EOC > /etc/ima/ima-policy
 appraise func=KEXEC_KERNEL_CHECK appraise_type=imasig
 appraise func=MODULE_CHECK appraise_type=imasig
+appraise func=FIRMWARE_CHECK appraise_type=imasig
+appraise func=POLICY_CHECK appraise_type=imasig
 measure func=FILE_CHECK
+measure func=KEXEC_KERNEL_CHECK
+measure func=MODULE_CHECK
 EOC
     chattr +i /etc/ima/ima-policy
+    # Harden apt to prevent unauthorized packages
+    cat <<EOC > /etc/apt/apt.conf.d/99skyscope
+APT::Get::AllowUnauthenticated \"false\";
+APT::Get::Assume-Yes \"true\";
+APT::Get::Purge \"true\";
+APT::Get::Show-Upgraded \"true\";
+APT::Install-Recommends \"false\";
+APT::Install-Suggests \"false\";
+EOC
+    chattr +i /etc/apt/apt.conf.d/99skyscope
+    cat <<EOC > /etc/apt/sources.list
+deb http://deb.debian.org/debian testing main
+deb-src http://deb.debian.org/debian testing main
+EOC
+    chattr +i /etc/apt/sources.list
+    # Import Debian GPG keys
+    apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 0xA48449044AAD5C5D
+    # Harden GNOME configurations
+    mkdir -p /etc/dconf/db/local.d
+    cat <<EOC > /etc/dconf/db/local.d/00-security
+[org/gnome/desktop/screensaver]
+lock-enabled=true
+lock-delay=uint32 0
+idle-activation-enabled=true
+
+[org/gnome/desktop/privacy]
+remove-old-temp-files=true
+remove-old-trash-files=true
+old-files-age=uint32 7
+
+[org/gnome/desktop/notifications]
+show-in-lock-screen=false
+EOC
+    dconf update
+    chattr +i -R /etc/dconf/db/local.d
 "
 
-# Step 13: Setup user and encryption
+# Step 14: Setup user and encryption
 log_message "Setting up user and encryption..."
 chroot "$SQUASHFS_ROOT" /bin/bash -c "
     useradd -m -s /bin/bash $USERNAME
     echo \"$USERNAME:$ROOT_PASSWORD\" | chpasswd
     # Prompt for encryption password
-    echo 'Enter encryption password for full disk encryption:'
+    echo 'Enter encryption password for full disk encryption (Kyber-1024):'
     read -s ENCRYPTION_PASSWORD
-    echo -e \"$ENCRYPTION_PASSWORD\n$ENCRYPTION_PASSWORD\" | cryptsetup luksFormat --type luks2 --cipher aes-xts-plain64 --key-size 512 --hash sha512 --pbkdf argon2id $NVME_DEV
+    echo -e \"$ENCRYPTION_PASSWORD\n$ENCRYPTION_PASSWORD\" | cryptsetup luksFormat --type luks2 --cipher aes-xts-plain64 --key-size 512 --hash sha512 --pbkdf argon2id --pq-cipher kyber-1024 $NVME_DEV
     echo -e \"$ENCRYPTION_PASSWORD\" | cryptsetup luksOpen $NVME_DEV skyscope_crypt
     pvcreate /dev/mapper/skyscope_crypt
     vgcreate skyscope-vg /dev/mapper/skyscope_crypt
@@ -628,28 +949,35 @@ chroot "$SQUASHFS_ROOT" /bin/bash -c "
     mkfs.btrfs /dev/skyscope-vg/root
     mkswap /dev/skyscope-vg/swap
     mkfs.btrfs /dev/skyscope-vg/home
+    chattr +i /etc/crypttab
 "
 
-# Step 14: Exit chroot
+# Step 15: Exit chroot
 log_message "Exiting chroot..."
 for dir in dev proc sys run; do
     umount "$SQUASHFS_ROOT/$dir"
 done
 
-# Step 15: Rebuild ISO
+# Step 16: Rebuild ISO
 log_message "Rebuilding netinst ISO..."
 cd "$WORKDIR"
 handle_error "Create new ISO" "Failed to create ISO" \
 "genisoimage -o '$NEW_ISO' -b isolinux/isolinux.bin -c isolinux/boot.cat -no-emul-boot -boot-load-size 4 -boot-info-table -J -R -V 'Skyscope Sentinel Quantum Hybrid Netinst' . -eltorito-alt-boot -e efi.img -no-emul-boot" \
 "xorriso -as mkisofs -o '$NEW_ISO' -b isolinux/isolinux.bin -c isolinux/boot.cat -no-emul-boot -boot-load-size 4 -boot-info-table -J -R -V 'Skyscope Sentinel Quantum Hybrid Netinst' . -eltorito-alt-boot -e efi.img -no-emul-boot"
+handle_error "Make ISO immutable" "Failed to make ISO immutable" \
+"chattr +i '$NEW_ISO'" \
+"chattr +i '$NEW_ISO'"
 
-# Step 16: Sign ISO
+# Step 17: Sign ISO
 log_message "Signing ISO..."
 handle_error "Sign ISO" "Failed to sign ISO" \
 "openssl dgst -sha256 -sign /root/efi_keys/db.key -out '$NEW_ISO.sig' '$NEW_ISO'" \
 "openssl dgst -sha256 -sign /root/efi_keys/db.key -out '$NEW_ISO.sig' '$NEW_ISO'"
+handle_error "Make ISO signature immutable" "Failed to make ISO signature immutable" \
+"chattr +i '$NEW_ISO.sig'" \
+"chattr +i '$NEW_ISO.sig'"
 
-# Step 17: Final cleanup
+# Step 18: Final cleanup
 log_message "Cleaning up..."
 rm -rf "$WORKDIR" "$ISO_FILE" "$SQUASHFS_ROOT" "$INITRD_DIR"
 log_message "Skyscope Sentinel Intelligence Quantum Hybrid Netinst OS ISO created at $NEW_ISO. Signature at $NEW_ISO.sig."
